@@ -169,14 +169,16 @@ class IRDaikinESP {
  public:
   explicit IRDaikinESP(IRrecv *rcv, IRsend *snd);
 
-#if SEND_DAIKIN
+  void sendDaikin(const unsigned char data[], const uint16_t nbytes, const uint16_t repeat);
+  void sendGeneric(const uint16_t headermark, const uint32_t headerspace,
+                         const uint16_t onemark, const uint32_t onespace,
+                         const uint16_t zeromark, const uint32_t zerospace,
+                         const uint16_t footermark, const uint32_t gap,
+                         const uint8_t *dataptr, const uint16_t nbytes,
+                         const uint16_t frequency, const bool MSBfirst,
+                         const uint16_t repeat);
   void send(const uint16_t repeat = kDaikinDefaultRepeat);
-  /// Run the calibration to calculate uSec timing offsets for this platform.
-  /// @return The uSec timing offset needed per modulation of the IR Led.
-  /// @note This will produce a 65ms IR signal pulse at 38kHz.
-  ///   Only ever needs to be run once per object instantiation, if at all.
-  int8_t calibrate(void) { return _irsend.calibrate(); }
-#endif
+
   bool decode();
   bool decodeDaikin();
   void on(void);
@@ -469,56 +471,6 @@ uint8_t sumBytes(const uint8_t * const start, const uint16_t length,
 }
 
 
-#undef SEND_DAIKIN
-#if SEND_DAIKIN
-/// Send a Daikin 280-bit A/C formatted message.
-/// Status: STABLE
-/// @param[in] data The message to be sent.
-/// @param[in] nbytes The number of bytes of message to be sent.
-/// @param[in] repeat The number of times the command is to be repeated.
-/// @see https://github.com/mharizanov/Daikin-AC-remote-control-over-the-Internet/tree/master/IRremote
-/// @see https://github.com/blafois/Daikin-IR-Reverse
-void IRsend::sendDaikin(const unsigned char data[], const uint16_t nbytes,
-                        const uint16_t repeat) {
-  if (nbytes < kDaikinStateLengthShort)
-    return;  // Not enough bytes to send a proper message.
-
-  for (uint16_t r = 0; r <= repeat; r++) {
-    uint16_t offset = 0;
-    // Send the header, 0b00000
-    sendGeneric(0, 0,  // No header for the header
-                kDaikinBitMark, kDaikinOneSpace, kDaikinBitMark,
-                kDaikinZeroSpace, kDaikinBitMark, kDaikinZeroSpace + kDaikinGap,
-                (uint64_t)0b00000, kDaikinHeaderLength, 38, false, 0, 50);
-    // Data #1
-    if (nbytes < kDaikinStateLength) {  // Are we using the legacy size?
-      // Do this as a constant to save RAM and keep in flash memory
-      sendGeneric(kDaikinHdrMark, kDaikinHdrSpace, kDaikinBitMark,
-                  kDaikinOneSpace, kDaikinBitMark, kDaikinZeroSpace,
-                  kDaikinBitMark, kDaikinZeroSpace + kDaikinGap,
-                  kDaikinFirstHeader64, 64, 38, false, 0, 50);
-    } else {  // We are using the newer/more correct size.
-      sendGeneric(kDaikinHdrMark, kDaikinHdrSpace, kDaikinBitMark,
-                  kDaikinOneSpace, kDaikinBitMark, kDaikinZeroSpace,
-                  kDaikinBitMark, kDaikinZeroSpace + kDaikinGap,
-                  data, kDaikinSection1Length, 38, false, 0, 50);
-      offset += kDaikinSection1Length;
-    }
-    // Data #2
-    sendGeneric(kDaikinHdrMark, kDaikinHdrSpace, kDaikinBitMark,
-                kDaikinOneSpace, kDaikinBitMark, kDaikinZeroSpace,
-                kDaikinBitMark, kDaikinZeroSpace + kDaikinGap,
-                data + offset, kDaikinSection2Length, 38, false, 0, 50);
-    offset += kDaikinSection2Length;
-    // Data #3
-    sendGeneric(kDaikinHdrMark, kDaikinHdrSpace, kDaikinBitMark,
-                kDaikinOneSpace, kDaikinBitMark, kDaikinZeroSpace,
-                kDaikinBitMark, kDaikinZeroSpace + kDaikinGap,
-                data + offset, nbytes - offset, 38, false, 0, 50);
-  }
-
-}
-#endif  // SEND_DAIKIN
 
 /// Class constructor.
 /// @param[in] pin GPIO to be used when sending.
@@ -528,13 +480,110 @@ IRDaikinESP::IRDaikinESP(IRrecv *rcv, IRsend *snd)
       : _irsend(snd), _irrecv(rcv) { stateReset(); }
 
 
-#if SEND_DAIKIN
+/// Send a Daikin 280-bit A/C formatted message.
+/// Status: STABLE
+/// @param[in] data The message to be sent.
+/// @param[in] nbytes The number of bytes of message to be sent.
+/// @param[in] repeat The number of times the command is to be repeated.
+/// @see https://github.com/mharizanov/Daikin-AC-remote-control-over-the-Internet/tree/master/IRremote
+/// @see https://github.com/blafois/Daikin-IR-Reverse
+void IRDaikinESP::sendDaikin(const unsigned char data[], const uint16_t nbytes,
+                        const uint16_t repeat) {
+  if (nbytes < kDaikinStateLength)
+    return;  // Not enough bytes to send a proper message.
+
+  for (uint16_t r = 0; r <= repeat; r++) {
+    uint16_t offset = 0;
+    // Send the header, 0b00000
+    // No header for the header
+    _irsend->sendPulseDistanceWidthData(DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros,DaikinProtocolConstants.DistanceWidthTimingInfo.OneSpaceMicros, 
+                                        DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros,
+                                        (uint64_t)0b00000, kDaikinHeaderLength, 0);
+    // Footer
+    _irsend->mark(DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros);
+    _irsend->space(DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros + kDaikinGap);
+
+    // Data #1
+    sendGeneric(DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.OneSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros + kDaikinGap,
+                data, kDaikinSection1Length, 38, false, 0);
+    offset += kDaikinSection1Length;
+    // Data #2
+    sendGeneric(DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderSpaceMicros, 
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.OneSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros + kDaikinGap,
+                data + offset, kDaikinSection2Length, 38, false, 0);
+    offset += kDaikinSection2Length;
+    // Data #3
+    sendGeneric(DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.HeaderSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.OneSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros,
+                DaikinProtocolConstants.DistanceWidthTimingInfo.OneMarkMicros, DaikinProtocolConstants.DistanceWidthTimingInfo.ZeroSpaceMicros + kDaikinGap,
+                data + offset, nbytes - offset, 38, false, 0);
+  }
+
+}
+
+
+/// Generic method for sending simple protocol messages.
+/// @param[in] headermark Nr. of usecs for the led to be pulsed for the header
+///   mark. A value of 0 means no header mark.
+/// @param[in] headerspace Nr. of usecs for the led to be off after the header
+///   mark. A value of 0 means no header space.
+/// @param[in] onemark Nr. of usecs for the led to be pulsed for a '1' bit.
+/// @param[in] onespace Nr. of usecs for the led to be fully off for a '1' bit.
+/// @param[in] zeromark Nr. of usecs for the led to be pulsed for a '0' bit.
+/// @param[in] zerospace Nr. of usecs for the led to be fully off for a '0' bit.
+/// @param[in] footermark Nr. of usecs for the led to be pulsed for the footer
+///   mark. A value of 0 means no footer mark.
+/// @param[in] gap Nr. of usecs for the led to be off after the footer mark.
+///   This is effectively the gap between messages.
+///   A value of 0 means no gap space.
+/// @param[in] dataptr Pointer to the data to be transmitted.
+/// @param[in] nbytes Nr. of bytes of data to be sent.
+/// @param[in] frequency The frequency we want to modulate at. (Hz/kHz)
+/// @param[in] MSBfirst Flag for bit transmission order.
+///   Defaults to MSB->LSB order.
+/// @param[in] repeat Nr. of extra times the message will be sent.
+///   e.g. 0 = 1 message sent, 1 = 1 initial + 1 repeat = 2 messages
+/// @param[in] dutycycle Percentage duty cycle of the LED.
+///   e.g. 25 = 25% = 1/4 on, 3/4 off.
+///   If you are not sure, try 50 percent.
+/// @note Assumes a frequency < 1000 means kHz otherwise it is in Hz.
+///   Most common value is 38000 or 38, for 38kHz.
+void IRDaikinESP::sendGeneric(const uint16_t headermark, const uint32_t headerspace,
+                         const uint16_t onemark, const uint32_t onespace,
+                         const uint16_t zeromark, const uint32_t zerospace,
+                         const uint16_t footermark, const uint32_t gap,
+                         const uint8_t *dataptr, const uint16_t nbytes,
+                         const uint16_t frequency, const bool MSBfirst,
+                         const uint16_t repeat) {
+  // Setup
+  _irsend->enableIROut(frequency);
+  // We always send a message, even for repeat=0, hence '<= repeat'.
+  for (uint16_t r = 0; r <= repeat; r++) {
+    // Header
+    if (headermark) _irsend->mark(headermark);
+    if (headerspace) _irsend->space(headerspace);
+
+    // Data
+    for (uint16_t i = 0; i < nbytes; i++)
+    _irsend->sendPulseDistanceWidthData(onemark,onespace, zeromark, zerospace, *(dataptr + i), 8, MSBfirst);
+
+    // Footer
+    if (footermark) _irsend->mark(footermark);
+    _irsend->space(gap);
+  }
+}
+
 /// Send the current internal state as an IR message.
 /// @param[in] repeat Nr. of times the message will be repeated.
 void IRDaikinESP::send(const uint16_t repeat) {
-  _irsend.sendDaikin(getRaw(), kDaikinStateLength, repeat);
+  sendDaikin(getRaw(), kDaikinStateLength, repeat);
 }
-#endif  // SEND_DAIKIN
 
 /// Verify the checksum is valid for a given state.
 /// @param[in] state The array to verify the checksum of.

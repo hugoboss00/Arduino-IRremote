@@ -636,8 +636,8 @@ bool IRDaikinESP::getPower(void) const {
 /// Set the temperature.
 /// @param[in] temp The temperature in degrees celsius.
 void IRDaikinESP::setTemp(const uint8_t temp) {
-  uint8_t degrees = std::max(temp, kDaikinMinTemp);
-  degrees = std::min(degrees, kDaikinMaxTemp);
+  uint8_t degrees = max(temp, kDaikinMinTemp);
+  degrees = min(degrees, kDaikinMaxTemp);
   _.Temp = degrees;
 }
 
